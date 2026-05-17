@@ -5,6 +5,7 @@
 import sys, os, json, re, uuid
 from pathlib import Path
 from datetime import datetime
+import urllib.request
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -76,24 +77,28 @@ PART_KEYWORDS = {
     "板": "plate", "平板": "plate",
     "箱体": "box", "盒子": "box", "方块": "block",
     "支架": "bracket", "支板": "bracket",
+    # 自然语言别名
+    "圆盘": "flange", "圆环": "flange", "垫片": "flange",
+    "圆筒": "sleeve", "管套": "sleeve", "管子": "sleeve",
+    "圆棒": "shaft", "圆柱": "shaft",
+    "方块": "block", "铁块": "block",
 }
 
 def extract_params(msg):
     p = {"material": "6061", "surface": "无", "quantity": 10, "weight_kg": 0.5}
+    hit = {"material": False, "surface": False, "quantity": False, "weight_kg": False}
     msg_lower = msg.lower()
     for mat in ["45钢", "6061", "304", "316l", "q235", "tc4", "钛合金"]:
         if mat in msg or mat in msg_lower:
-            p["material"] = mat
-            break
+            p["material"] = mat; hit["material"] = True; break
     for s in ["阳极氧化", "发黑", "镀锌", "镀铬", "镀镍", "磷化", "喷漆"]:
         if s in msg:
-            p["surface"] = s
-            break
-    m = re.search(r'(\d+)\s*件', msg)
-    if m: p["quantity"] = int(m.group(1))
+            p["surface"] = s; hit["surface"] = True; break
+    m = re.search(r'(\d+)\s*[件个套]', msg)
+    if m: p["quantity"] = int(m.group(1)); hit["quantity"] = True
     m = re.search(r'(\d+\.?\d*)\s*kg', msg_lower)
-    if m: p["weight_kg"] = float(m.group(1))
-    return p
+    if m: p["weight_kg"] = float(m.group(1)); hit["weight_kg"] = True
+    return p, any(hit.values())
 
 def bot_reply(message):
     msg = message.strip()
@@ -108,11 +113,20 @@ def bot_reply(message):
             "**导出**: 一键打包ZIP\n"
             "装Ollama才有: AI对话/专家会议/工艺建议"
         ), "type": "help"}
-    is_draw = any(k in msg for k in ["画", "生成", "创建", "建模"]) and any(pt in msg for pt in PART_KEYWORDS)
+    has_draw_keyword = any(k in msg for k in ["画", "生成", "创建", "建模"])
+    has_part_keyword = any(pt in msg for pt in PART_KEYWORDS)
+    is_draw = has_draw_keyword and has_part_keyword
+    llm_part_type = None
+    if has_draw_keyword and not has_part_keyword and detect_ollama()["available"]:
+        llm_r = _llm_parse(msg, '{"part_type": "(flange|sleeve|shaft|plate|box|bracket)", "params": {...}} 用户想画什么零件? 选一个最接近的类型')
+        if llm_r and "part_type" in llm_r:
+            llm_part_type = llm_r["part_type"]
+            is_draw = True
     if is_draw:
-        part_type = "flange"
-        for cn, en in PART_KEYWORDS.items():
-            if cn in msg: part_type = en; break
+        part_type = llm_part_type or "flange"
+        if not llm_part_type:
+            for cn, en in PART_KEYWORDS.items():
+                if cn in msg: part_type = en; break
         params = {"od": 100, "id": 50, "thickness": 20}
         od_m = re.search(r'外径\s*(\d+)', msg) or re.search(r'od\s*(\d+)', ml)
         id_m = re.search(r'内径\s*(\d+)', msg) or re.search(r'id\s*(\d+)', ml)
@@ -120,6 +134,19 @@ def bot_reply(message):
         len_m = re.search(r'长\s*(\d+)', msg) or re.search(r'长度\s*(\d+)', msg)
         w_m = re.search(r'宽\s*(\d+)', msg) or re.search(r'w\s*(\d+)', ml)
         h_m = re.search(r'高\s*(\d+)', msg) or re.search(r'h\s*(\d+)', ml)
+        has_numbers = od_m or id_m or th_m or len_m or w_m or h_m
+        if not has_numbers and detect_ollama()["available"]:
+            # LLM兜底: 用户可能说自然语言
+            llm_schema = f'{{"part_type": "(flange|sleeve|shaft|plate|box|bracket)", "params": {{"od": "mm", "id": "mm"}}}} 可用类型: flange(法兰), sleeve(轴套), shaft(轴), plate(板), box(箱体), bracket(支架)'
+            llm_r = _llm_parse(msg, llm_schema)
+            if llm_r and "part_type" in llm_r:
+                part_type = llm_r["part_type"]
+                lp = llm_r.get("params", {})
+                params = {"od": int(lp.get("od", 100)), "id": int(lp.get("id", 50)),
+                          "thickness": int(lp.get("thickness", 20))}
+                if lp.get("length"): params["length"] = int(lp["length"])
+                if lp.get("w"): params["w"] = int(lp["w"])
+                if lp.get("h"): params["h"] = int(lp["h"])
         if od_m: params["od"] = int(od_m.group(1))
         if id_m: params["id"] = int(id_m.group(1))
         if th_m: params["thickness"] = int(th_m.group(1))
@@ -139,9 +166,15 @@ def bot_reply(message):
             "继续: 说出材料和数量即可报价",
         ]
         return {"reply": "\n".join(lines), "type": "step", "stl_url": gen.get("stl_url"), "step_file": gen.get("step_file")}
-    is_quote = any(k in ml for k in ["报价", "价格", "多少钱", "成本"])
+    is_quote = any(k in ml for k in ["报价", "价格", "多少钱", "成本", "价格是"])
     if is_quote:
-        params = extract_params(msg)
+        params, has_hit = extract_params(msg)
+        if not has_hit and detect_ollama()["available"]:
+            llm_r = _llm_parse(msg, '{"material": "(6061|304|45钢|tc4|316l|q235)", "quantity": 50, "surface": "(阳极氧化|发黑|镀锌|无)"} 只输出JSON,没有的字段不要.')
+            if llm_r:
+                if "material" in llm_r: params["material"] = llm_r["material"]
+                if "quantity" in llm_r: params["quantity"] = int(llm_r["quantity"])
+                if "surface" in llm_r: params["surface"] = llm_r["surface"]
         q = calc_quote(**params)
         lines = [
             "## 报价明细",
@@ -188,6 +221,28 @@ def check_conflict(material, surface):
             conflicts.append({"severity": "warn" if mild else "error", "rule": m+":"+s, "message": desc})
     return {"valid": len([c for c in conflicts if c["severity"]=="error"])==0, "conflicts": conflicts}
 
+def _llm_parse(prompt: str, schema: str) -> dict:
+    """调用本地Ollama解析自然语言→结构化JSON. 返回{}表示失败."""
+    try:
+        body = json.dumps({
+            "model": "qwen2.5:1.5b",
+            "prompt": f"从用户描述中提取JSON. 只输出JSON, 不要解释.\n{schema}\n用户: {prompt}",
+            "stream": False,
+            "options": {"temperature": 0.1, "num_predict": 256}
+        }).encode()
+        req = urllib.request.Request("http://localhost:11434/api/generate",
+                                     data=body, headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+        text = data.get("response", "").strip()
+        # 提取JSON块
+        m = re.search(r'\{(?:[^{}]|\{[^{}]*\})*\}', text, re.DOTALL)
+        if m:
+            return json.loads(m.group())
+        return {}
+    except Exception:
+        return {}
+
 def detect_ollama():
     try:
         req = urllib.request.Request("http://localhost:11434/api/tags")
@@ -196,8 +251,6 @@ def detect_ollama():
         return {"available": True, "models": [m["name"] for m in data.get("models", [])]}
     except:
         return {"available": False, "models": []}
-
-import urllib.request
 
 app = FastAPI(title="Union由你 Lite", version="11.0.4-lite")
 
