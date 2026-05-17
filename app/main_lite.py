@@ -404,7 +404,11 @@ async def demo():
     return JSONResponse(content={"title": "v11.0.4 Lite 演示", "scenes": scenes})
 
 if __name__ == "__main__":
-    print(" Union由你 Lite v11.0.4 - 离线工业炼金术师")
-    print(" 零AI依赖 | 画图/报价/预览/打包")
-    print(" http://localhost:7861")
-    uvicorn.run(app, host="0.0.0.0", port=7861, log_level="warning")
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=7861, help="服务端口")
+    args = parser.parse_args()
+    print(f" Union由你 Lite v11.0.5 - 离线工业炼金术师")
+    print(f" 零AI依赖 | 画图/报价/预览/打包")
+    print(f" http://localhost:{args.port}")
+    uvicorn.run(app, host="0.0.0.0", port=args.port, log_level="warning")

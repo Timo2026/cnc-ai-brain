@@ -810,4 +810,8 @@ document.getElementById('viewer').addEventListener('mouseenter',function(){
 </html>"""
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=7861, log_level="info")
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=7861, help="服务端口")
+    args = parser.parse_args()
+    uvicorn.run(app, host="0.0.0.0", port=args.port, log_level="info")
