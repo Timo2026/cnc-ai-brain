@@ -1,0 +1,59 @@
+{
+  "//": "Union CNC AI 模型配置 — 零硬编码，自动适配",
+  "//info": "Ollama自动检测无需配置。Cloud模型手动添加。系统自动选最优。",
+  "//usage": "只需填入cloud.api_key: 把'sk-your-key-here'替换为真实key即可。不改也完全可用（使用本地Ollama）。",
+
+  "preference": "auto",
+  "//pref": "auto=自动选最优, local=优先本地(低延迟), cloud=优先云端(高质量)",
+
+  "cloud": [
+    {
+      "name": "deepseek-chat",
+      "provider": "openai",
+      "api_key": "sk-your-key-here",
+      "api_url": "https://api.deepseek.com/v1",
+      "model_id": "deepseek-chat",
+      "quality_score": 95,
+      "param_count": 70,
+      "description": "DeepSeek V4 云端 — 最高质量"
+    },
+    {
+      "name": "glm-4-flash",
+      "provider": "openai",
+      "api_key": "sk-your-key-here",
+      "api_url": "https://open.bigmodel.cn/api/paas/v4",
+      "model_id": "glm-4-flash",
+      "quality_score": 80,
+      "param_count": 14,
+      "description": "智谱GLM-4-Flash — 免费额度"
+    },
+    {
+      "name": "qwen-turbo",
+      "provider": "openai",
+      "api_key": "sk-your-key-here",
+      "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "model_id": "qwen-turbo",
+      "quality_score": 85,
+      "param_count": 14,
+      "description": "通义千问Turbo — 阿里云API"
+    }
+  ],
+
+  "ollama": {
+    "//auto_detected": true,
+    "//comment": "Ollama模型自动检测，无需手动配置"
+  },
+
+  "selection_rules": {
+    "expert_meeting": {
+      "min_quality": 60,
+      "prefer": "local",
+      "//comment": "专家会议优先本地模型(低延迟)，低于60分则用云端"
+    },
+    "chat": {
+      "min_quality": 40,
+      "prefer": "auto",
+      "//comment": "日常对话自动选最优"
+    }
+  }
+}

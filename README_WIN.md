@@ -1,95 +1,66 @@
-# 🦞 Union·由你 — CNC AI 工艺大脑 v11.0.4
-## Windows 一键部署说明
+# Union·由你 CNC AI 工艺大脑 v11.0.4 — Windows 部署
 
----
+## 两种模式
 
-## 一、极速启动（1分钟）
+### 模式 A：纯本地（Ollama，推荐）
 
-### 要求
-- Windows 10/11
-- 网络（首次安装依赖需要）
+1. 装 Ollama: https://ollama.com/download/windows
+2. 拉模型: `ollama pull qwen2.5:3b`
+3. 双击 `install_windows.bat`
 
-### 步骤
-1. **解压** 本包到任意目录（路径不要有中文）
-2. **双击** `一键启动.bat`
-3. **等待** 自动安装依赖（约1-2分钟）
-4. **浏览器** 自动打开 http://localhost:7861
-5. **开始使用！**
+系统自动检测Ollama模型，自动选最优。
 
-### 就这么简单。
-不需要装 Python 以外的东西。
-不需要装 Ollama。
-不需要 AI 模型。
-不需要 GPU。
+### 模式 B：云端API（DeepSeek/GLM/通义）
 
----
+编辑 `config\models.json`，填入你的API key：
 
-## 二、有什么功能
-
-| 功能 | 需要什么 | 说明 |
-|------|----------|------|
-| ✅ 一句话画STEP | 无 | "画一个法兰 外径100内径50厚20" |
-| ✅ 3D实时预览 | 无 | Three.js 旋转/缩放/平移 |
-| ✅ CNC报价 | 无 | 5材料梯度 / 8表面处理 |
-| ✅ 工艺冲突检测 | 无 | 纯规则引擎，零延迟 |
-| ✅ 上传STEP报价 | 无 | 拖拽STEP自动解析包围盒 |
-| ✅ ZIP打包导出 | 无 | 包含STEP+报价+清单 |
-| ✅ 离线运行 | 无 | 全部本地，无需联网 |
-| ❌ AI专家会议 | Ollama | 额外功能，不影响核心使用 |
-
----
-
-## 三、想升级？装Ollama加AI（可选）
-
-如果想用 AI 对话和专家会议：
-
-```cmd
-# 1. 下载安装 Ollama
-https://ollama.com/download/windows
-
-# 2. 拉取模型（约2GB）
-ollama pull qwen2.5:3b
-
-# 3. 运行完整版（替代 Lite）
-python app/main.py
+```json
+{
+  "cloud": [
+    {
+      "name": "deepseek-chat",
+      "provider": "openai",
+      "api_key": "sk-你的key",
+      "api_url": "https://api.deepseek.com/v1",
+      "model_id": "deepseek-chat",
+      "quality_score": 95
+    }
+  ]
+}
 ```
 
-完整版 v11.0.4 额外支持：
-- 💬 AI 对话咨询
-- 🏛️ 5人专家会议（CFO/工艺/战略/BI/CEO）
-- 📊 审计哈希链
-- ⚖️ Schema 校验
+支持所有 OpenAI 兼容接口：DeepSeek、智谱GLM、通义千问、Moonshot、Claude(OpenAI兼容版)等。
 
----
+双击 `install_windows.bat`，系统自动选最高质量的可用模型。
 
-## 四、常见问题
+### 模式 C：混合
 
-**Q: 报错 "Python 没有安装"**
-A: 访问 https://www.python.org/downloads/ 下载安装，勾选"Add Python to PATH"
+本地跑专家会议（低延迟），云端跑CEO决策（高质量）。
 
-**Q: 安装依赖很慢**
-A: `一键启动.bat` 默认使用清华镜像源，如果还慢，手动运行：
-```cmd
-pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
-```
+全自动，无需手动切换。
 
-**Q: 报价准吗？**
-A: 报价基于材料系数×重量×表面处理×数量折扣，是公开市场价的估算。
-   精度约 ±30%。实际报价需人工确认。
+## 系统要求
 
-**Q: 能脱机使用吗？**
-A: 能。全部代码和依赖安装后，不需要联网。
+- Windows 10/11 (x64)
+- Python 3.10+
+- 模式A需要: Ollama + 约2GB下载
 
-**Q: 怎么关闭？**
-A: 命令行按 Ctrl+C 或关掉命令行窗口。
+## 启动后
 
----
+| 地址 | 功能 |
+|------|------|
+| http://localhost:7861 | 主界面 — 画图/报价/3D预览 |
+| http://localhost:7861/api/models | 模型列表 — 查看可用模型 |
+| http://localhost:7861/api/health | 健康检查 |
+| http://localhost:7861/api/dashboard | 仪表盘 |
 
-## 五、源代码
-GitHub: https://github.com/Timo2026/cnc-ai-brain
-Release: https://github.com/Timo2026/cnc-ai-brain/releases/tag/v11.0.4
+## 模型配置说明
 
----
+系统启动时会：
+1. 自动扫描本机Ollama所有模型 → 质量评分排序
+2. 检查 `config/models.json` 中配置的云端API
+3. 按质量分从高到低选最优模型
 
-作者: timo.cao | 邮箱: miscdd@163.com
-生成: 大帅教练系统 (dashuai coach) | v11.0.4
+**不需要手动指定模型。不需要硬编码。**
+
+作者: timo.cao | 邮箱: miscdd@163.com | 生成: 大帅教练系统 (dashuai coach)

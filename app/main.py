@@ -16,8 +16,10 @@ import uvicorn
 
 from src.core.environment_detector import EnvironmentDetector
 from src.core.model_auto_loader import ModelAutoLoader
+from src.core.model_registry import ModelRegistry
 from src.core.skill_auto_loader import SkillAutoLoader
 from src.ai_engine.ollama_engine import OllamaEngine
+from src.ai_engine.engine import AIEngine
 from src.neuro_core.serial_expert import SerialExpertOrchestrator
 from src.neuro_core.schema_validator import SchemaValidator
 from src.neuro_core.conflict_check import ConflictChecker
@@ -40,9 +42,22 @@ def wrap_shadow(response: dict) -> dict:
 # ── 全局启动 ──
 detector = EnvironmentDetector(PROJECT_ROOT)
 env = detector.detect()
-best = ModelAutoLoader(env).select_best_model()
+
+# 模型注册表 — 自动检测Ollama + 云端配置
+model_registry = ModelRegistry(PROJECT_ROOT / "config" / "models.json")
+best_config = model_registry.select_best(min_quality=0)
+if not best_config:
+    best_config = ModelAutoLoader(env).select_best_model()
+
+# 根据模型来源选择引擎
+if best_config and best_config.get("source") == "cloud":
+    ai = AIEngine(best_config)
+elif best_config:
+    ai = OllamaEngine(best_config["name"])
+else:
+    ai = OllamaEngine("qwen2.5:3b")  # 默认fallback
+
 registry = SkillAutoLoader(env).load_all()
-ai = OllamaEngine(best["name"])
 bus = EventBus()
 progress = ProgressReporter(bus)
 conflict_checker = ConflictChecker(ai)
@@ -64,8 +79,11 @@ STARTUP_INFO = {
     "cpu": env["cpu"]["brand"], "cores": env["cpu"]["cores_physical"],
     "memory_gb": env["memory_gb"],
     "gpu": env["gpu"][0]["name"] if env["gpu"] else "CPU Only",
-    "model": best["name"], "model_params": best.get("param_size", "unknown"),
-    "expert_count": best.get("expert_count", 3),
+    "model": best_config["name"] if best_config else "unknown",
+    "model_source": best_config.get("source", "ollama") if best_config else "unknown",
+    "model_params": best_config.get("param_size", best_config.get("param_count", "unknown")) if best_config else "unknown",
+    "model_provider": best_config.get("provider", "ollama") if best_config else "none",
+    "expert_count": best_config.get("expert_count", 3) if best_config else 3,
     "skills": len(registry["skills"]), "experts": list(registry["experts"].keys()),
     "tools": skill_registry.list_available(), "version": "11.0.4",
 }
@@ -78,8 +96,17 @@ print("=" * 60)
 print("🦞 Union·由你 — CNC AI 工艺大脑 v11.0.4")
 print("  一句话画图·3D预览·上传报价·输出打包")
 print("=" * 60)
+if best_config:
+    src = best_config.get("source", "?")
+    prov = best_config.get("provider", "?")
+    print(f"🤖 模型: {best_config['name']} ({src}/{prov})")
+    if src == "cloud":
+        print(f"☁️  云端: {best_config.get('api_url', '?')}")
+    else:
+        print(f"💻 本地: {best_config.get('size_gb', '?')}GB")
+print("=" * 60)
 print(f"🖥️  {env['cpu']['brand']} | {env['cpu']['cores_physical']}核 | {env['memory_gb']}GB")
-print(f"🧠 模型: {best['name']} | 👥 {best.get('expert_count', 3)}人董事会")
+print(f"🧠 模型: {best_config['name'] if best_config else 'none'} | 👥 {best_config.get('expert_count', 3) if best_config else 3}人董事会")
 print(f"📐 STEP生成: trimesh | 🎨 3D预览: Three.js | 📦 ZIP打包: 就绪")
 print("=" * 60)
 
@@ -109,9 +136,11 @@ async def status(): return JSONResponse(content=STARTUP_INFO)
 @app.get("/api/health")
 async def health():
     return JSONResponse(content={
-        "status": "healthy", "model": best["name"],
-        "model_params": best.get("param_size", "unknown"),
-        "experts": best.get("expert_count", 3),
+        "status": "healthy",
+        "model": best_config["name"] if best_config else "none",
+        "model_source": best_config.get("source", "none") if best_config else "none",
+        "model_params": best_config.get("param_size", best_config.get("param_count", "unknown")) if best_config else "unknown",
+        "experts": best_config.get("expert_count", 3) if best_config else 3,
         "skills": len(registry["skills"]),
         "expert_list": list(registry["experts"].keys()),
         "tools": skill_registry.list_available(),
@@ -121,10 +150,22 @@ async def health():
         "memory_gb": env["memory_gb"],
         "current_task": CURRENT_TASK,
         "version": "11.0.4",
+        "model_provider": best_config.get("provider", "none") if best_config else "none",
     })
 
 @app.get("/api/version")
 async def version(): return JSONResponse(content={"version": "11.0.4", "codename": "工业炼金术师"})
+
+@app.get("/api/models")
+async def list_models():
+    all_m = model_registry.get_all_ranked()
+    return JSONResponse(content={
+        "total": len(all_m),
+        "best": best_config,
+        "models": [{"name": m["name"], "source": m["source"], "score": m["quality_score"],
+                     "provider": m.get("provider", "?")} for m in all_m],
+        "config_path": str(model_registry.config_path),
+    })
 
 @app.get("/api/progress")
 async def task_progress(): return JSONResponse(content=CURRENT_TASK)
