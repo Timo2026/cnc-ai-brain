@@ -21,6 +21,7 @@ from src.core.model_auto_loader import ModelAutoLoader
 from src.core.skill_auto_loader import SkillAutoLoader
 from src.ai_engine.ollama_engine import OllamaEngine
 from src.neuro_core.serial_expert import SerialExpertOrchestrator
+from src.neuro_core.schema_validator import SchemaValidator
 from src.neuro_core.conflict_check import ConflictChecker
 from src.safety.audit_logger import AuditLogger
 from src.runtime.event_bus import EventBus
@@ -61,7 +62,8 @@ skill_registry.register(
 history_lookup.seed_demo_data()
 
 expert_engine = SerialExpertOrchestrator(ai, registry["experts"], bus,
-                                          skill_registry=skill_registry)
+                                          skill_registry=skill_registry,
+                                          schema_validator=SchemaValidator(registry["experts"]))
 
 STARTUP_INFO = {
     "status": "ready",
@@ -78,6 +80,11 @@ STARTUP_INFO = {
     "tools": skill_registry.list_available(),
     "version": "11.0.0-AutoAdapt-tools",
 }
+
+# 启动时间（用于健康检查）
+import time as _time
+SERVER_START_TIME = _time.time()
+CURRENT_TASK = {"active": False, "name": None, "progress": 0}
 
 print("=" * 60)
 print("🦞 Union·由你 — CNC AI 工艺大脑 v11.0-AutoAdapt")
@@ -119,6 +126,30 @@ async def index():
 @app.get("/api/status")
 async def status():
     return JSONResponse(content=STARTUP_INFO)
+
+
+@app.get("/api/health")
+async def health():
+    return JSONResponse(content={
+        "status": "healthy",
+        "model": best["name"],
+        "model_params": best.get("param_size", "unknown"),
+        "experts": best.get("expert_count", 3),
+        "skills": len(registry["skills"]),
+        "expert_list": list(registry["experts"].keys()),
+        "tools": skill_registry.list_available(),
+        "audit_records": audit.count() if hasattr(audit, 'count') else 'N/A',
+        "uptime_seconds": int(_time.time() - SERVER_START_TIME),
+        "cpu_cores": env["cpu"]["cores_physical"],
+        "memory_gb": env["memory_gb"],
+        "current_task": CURRENT_TASK,
+    })
+
+
+@app.get("/api/progress")
+async def task_progress():
+    """当前任务进度（前端轮询用）。"""
+    return JSONResponse(content=CURRENT_TASK)
 
 
 def _extract_params(message: str) -> dict:
@@ -185,6 +216,11 @@ async def chat(request: Request):
         triggers = []
 
     if triggers:
+        # 进度状态
+        CURRENT_TASK["active"] = True
+        CURRENT_TASK["name"] = "专家会议"
+        CURRENT_TASK["progress"] = 10
+
         # 选择专家
         expert_list = []
         if any(k in msg_lower for k in ["报价", "成本", "价格", "利润", "预算"]):
@@ -197,6 +233,8 @@ async def chat(request: Request):
         seen = set()
         expert_list = [x for x in expert_list if not (x in seen or seen.add(x))]
 
+        CURRENT_TASK["progress"] = 20
+
         context = {
             "user_input": message,
             "triggers": triggers,
@@ -204,7 +242,16 @@ async def chat(request: Request):
             "timestamp": datetime.now().isoformat(),
         }
 
-        report = expert_engine.convene(message, context, expert_list)
+        # 进度回调
+        def _progress_cb(idx: int, ename: str):
+            CURRENT_TASK["progress"] = 30 + idx * (60 // max(len(expert_list), 1))
+            CURRENT_TASK["name"] = f"{ename} 分析中..."
+
+        report = expert_engine.convene(message, context, expert_list,
+                                       progress_cb=_progress_cb)
+
+        CURRENT_TASK["active"] = False
+        CURRENT_TASK["progress"] = 100
         audit.log(task_id=f"{datetime.now().strftime('%Y%m%d%H%M%S')}-panel",
                   event_type="expert_panel",
                   data={"topic": message[:200], "decision": report.get("decision"), "triggers": triggers})
@@ -385,6 +432,34 @@ async function send(){
     input.value='';
     document.getElementById('send-btn').disabled=true;
     document.getElementById('thinking').classList.add('show');
+    
+    // 进度轮询
+    let progressTimer=setInterval(async ()=>{
+        try{
+            let pr=await fetch('/api/progress');
+            let pd=await pr.json();
+            if(pd.active){
+                let think=document.getElementById('thinking');
+                let pct=pd.progress||0;
+                think.innerHTML='<span class="spinner"></span><span class="spinner"></span><span class="spinner"></span>'+
+                    '<span style="margin-left:8px;color:#94a3b8;font-size:13px">'+pd.name+' ('+pct+'%)</span>';
+                // 进度条
+                if(!think.querySelector('.pbar')){
+                    let bar=document.createElement('div');
+                    bar.className='pbar';
+                    bar.style.cssText='height:3px;background:#1e3a5f;border-radius:2px;margin-top:4px;overflow:hidden;width:100%';
+                    let fill=document.createElement('div');
+                    fill.className='pfill';
+                    fill.style.cssText='height:100%;background:linear-gradient(90deg,#2563eb,#38bdf8);width:'+pct+'%;transition:width .3s';
+                    bar.appendChild(fill);
+                    think.appendChild(bar);
+                }else{
+                    think.querySelector('.pfill').style.width=pct+'%';
+                }
+            }
+        }catch(e){}
+    },2000);
+    
     try{
         let r=await fetch('/api/chat',{
             method:'POST',
@@ -396,8 +471,11 @@ async function send(){
     }catch(e){
         addMsg('bot','⚠️ 连接失败: '+e.message);
     }
+    clearInterval(progressTimer);
     document.getElementById('send-btn').disabled=false;
     document.getElementById('thinking').classList.remove('show');
+    document.getElementById('thinking').innerHTML='<span class="spinner"></span><span class="spinner"></span><span class="spinner"></span>'+
+        '<span style="margin-left:8px;color:#94a3b8;font-size:13px">思考中...</span>';
 }
 
 function addMsg(role,text){

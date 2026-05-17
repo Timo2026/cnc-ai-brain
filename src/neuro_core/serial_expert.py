@@ -3,12 +3,14 @@
 单一 LLM 实例，顺序切换角色。
 支持一票否决 + CEO 覆写 + Skill 工具调用。
 所有通信为标准 JSON。
+v13.1: 新增 Schema 校验器，不通过自动重试。
 """
 import json
 from typing import Dict, List, Optional, Any
 from src.ai_engine.ollama_engine import OllamaEngine
 from src.runtime.event_bus import EventBus
 from src.runtime.skill_caller import SkillCaller
+from src.neuro_core.schema_validator import SchemaValidator
 
 
 class SerialExpertOrchestrator:
@@ -25,15 +27,18 @@ class SerialExpertOrchestrator:
 
     def __init__(self, ai_engine: OllamaEngine, expert_registry: Dict[str, Dict],
                  event_bus: Optional[EventBus] = None,
-                 skill_registry: Optional[SkillCaller] = None):
+                 skill_registry: Optional[SkillCaller] = None,
+                 schema_validator: Optional[SchemaValidator] = None):
         self.ai = ai_engine
         self.experts = expert_registry
         self.bus = event_bus or EventBus()
         self.skills = skill_registry or SkillCaller()
+        self.schema = schema_validator or SchemaValidator(expert_registry)
         self.transcript: List[Dict[str, Any]] = []
 
     def convene(self, topic: str, context: Dict[str, Any],
-                expert_names: List[str]) -> Dict[str, Any]:
+                expert_names: List[str],
+                progress_cb=None) -> Dict[str, Any]:
         """
         召开专家会议。
         
@@ -41,6 +46,7 @@ class SerialExpertOrchestrator:
             topic: 议题
             context: 上下文数据（含报价详情、客户信息等）
             expert_names: 需要征询的专家名称列表
+            progress_cb: (index, name) 进度回调
         
         Returns:
             标准 JSON dict: {decision, summary, transcript, tool_usage, ...}
@@ -51,9 +57,12 @@ class SerialExpertOrchestrator:
         analyses: Dict[str, Dict[str, Any]] = {}
         all_tool_results: Dict[str, Dict] = {}
 
-        for name in expert_names:
+        for idx, name in enumerate(expert_names):
             if name not in self.experts:
                 continue
+
+            if progress_cb:
+                progress_cb(idx, name)
 
             expert_cfg = self.experts[name]
             self._emit("analyzing", expert=name, message=f"{name} 正在调用工具分析...")
@@ -129,16 +138,36 @@ JSON Schema:
 
         raw = self.ai.chat(prompt, system_prompt=cfg.get("system_prompt", ""), temperature=0.3)
 
+        # JSON 解析
         try:
             analysis = json.loads(raw)
         except json.JSONDecodeError:
-            # 尝试提取 JSON 块
             import re
             match = re.search(r'\{[\s\S]*\}', raw)
             try:
                 analysis = json.loads(match.group(0)) if match else {}
             except (json.JSONDecodeError, AttributeError):
                 analysis = {"analysis": raw.strip()[:500], "recommendation": "abstain", "confidence": 0.0}
+
+        # Schema 校验 — 不通过则重试一次
+        vr = self.schema.validate(name, json.dumps(analysis, ensure_ascii=False) if isinstance(analysis, dict) else raw)
+        if not vr["valid"]:
+            self._emit("warn", expert=name,
+                       message=f"{name} Schema校验失败: {vr.get('error','')}, 重试...")
+            # 重试：追加校验错误到 prompt
+            retry_prompt = prompt + f"\n\n【纠错指令】上次输出未通过JSON Schema校验，错误: {vr.get('error', '')}。请严格按Schema输出。"
+            raw2 = self.ai.chat(retry_prompt, system_prompt=cfg.get("system_prompt", ""), temperature=0.2)
+            try:
+                analysis = json.loads(raw2)
+            except json.JSONDecodeError:
+                import re
+                match = re.search(r'\{[\s\S]*\}', raw2)
+                try:
+                    analysis = json.loads(match.group(0)) if match else {}
+                except (json.JSONDecodeError, AttributeError):
+                    analysis = {"analysis": raw2.strip()[:500], "recommendation": "abstain", "confidence": 0.0}
+            vr2 = self.schema.validate(name, json.dumps(analysis, ensure_ascii=False) if isinstance(analysis, dict) else raw2)
+            analysis["_schema_valid"] = vr2["valid"]
 
         analysis.setdefault("analysis", "")
         analysis.setdefault("recommendation", "abstain")
