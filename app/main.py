@@ -197,6 +197,44 @@ async def get_audit(request: Request):
     return JSONResponse(content={"records": records, "chain_verify": verify})
 
 
+@app.get("/api/demo")
+async def demo():
+    """演示模式: 自动走5个场景"""
+    scenes = [
+        ("S1: 常规报价", {"material": "6061", "surface": "阳极氧化", "quantity": 50}),
+        ("S2: 钛合金", {"material": "钛合金TC4", "quantity": 10, "weight_kg": 0.8}),
+        ("S3: 冲突阻断", {"material": "304", "surface": "阳极氧化", "quantity": 30}),
+        ("S4: 冲突修复", {"material": "304", "surface": "钝化", "quantity": 30}),
+        ("S5: 专家会", {"material": "钛合金TC4", "quantity": 10, "tolerance": "IT5", "estimated_price": 50000}),
+    ]
+    results = []
+    for name, params in scenes:
+        try:
+            if name == "S3: 冲突阻断":
+                conflicts = conflict_checker.check(params)
+                results.append({"scene": name, "status": "blocked" if not conflicts["valid"] else "ok",
+                               "data": conflicts})
+            elif name == "S5: 专家会":
+                test_msg = f"钛合金TC4 法兰 IT5 10件 预算50000 能接吗"
+                need = len(detect_triggers(test_msg)) > 0
+                results.append({"scene": name, "status": "panel_triggered" if need else "no_trigger",
+                               "triggers": detect_triggers(test_msg), "note": "请在前端手动触发专家会议"})
+            else:
+                result = quote_adapter.quote(params)
+                results.append({"scene": name, "status": "ok",
+                               "price": result.get("final_price", 0),
+                               "material": result.get("material", params.get("material"))})
+        except Exception as e:
+            results.append({"scene": name, "status": "error", "error": str(e)})
+
+    return JSONResponse(content={"title": "演示模式", "scenes": results})
+
+
+@app.get("/api/dashboard", response_class=HTMLResponse)
+async def dashboard():
+    return HTMLResponse(content=HTML_DASHBOARD)
+
+
 @app.post("/api/chat")
 async def chat(request: Request):
     body = await request.json()
@@ -344,6 +382,70 @@ async def chat(request: Request):
     return JSONResponse(content={"reply": response})
 
 
+# ── HTML 仪表盘 ──
+HTML_DASHBOARD = """<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>仪表盘 | CNC AI Brain</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Noto Sans CJK SC','Microsoft YaHei',sans-serif;background:#0f172a;color:#e2e8f0;padding:24px}
+h1{color:#38bdf8;font-size:20px;margin-bottom:24px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin-bottom:24px}
+.card{background:#1e293b;border-radius:12px;padding:20px;border:1px solid #334155}
+.card .label{font-size:12px;color:#94a3b8;margin-bottom:4px}
+.card .value{font-size:32px;font-weight:bold}
+.card .value.green{color:#22c55e}.card .value.blue{color:#38bdf8}.card .value.yellow{color:#f59e0b}
+.bar{background:#1e293b;border-radius:8px;padding:12px;margin-bottom:8px;display:flex;align-items:center;gap:12px}
+.bar .tag{font-size:11px;padding:2px 8px;border-radius:4px;background:#2563eb;color:#fff}
+.bar .tag.red{background:#dc2626}.bar .tag.green{background:#22c55e}
+.bar .text{font-size:13px;color:#cbd5e1}
+table{width:100%;border-collapse:collapse;margin-top:16px}
+th{text-align:left;font-size:12px;color:#94a3b8;padding:8px 0;border-bottom:1px solid #334155}
+td{font-size:13px;padding:8px 0;border-bottom:1px solid #1e293b}
+</style></head>
+<body>
+<h1>⚙️ CNC AI Brain 仪表盘</h1>
+<div class="grid">
+<div class="card"><div class="label">今日报价</div><div class="value blue" id="cnt-quote">-</div></div>
+<div class="card"><div class="label">专家会议</div><div class="value blue" id="cnt-panel">-</div></div>
+<div class="card"><div class="label">审计链</div><div class="value green" id="audit-status">-</div></div>
+<div class="card"><div class="label">运行时长</div><div class="value green" id="uptime">-</div></div>
+</div>
+<h2 style="font-size:16px;color:#94a3b8;margin-bottom:12px">报价梯度</h2>
+<table><thead><tr><th>材料</th><th>10件</th><th>50件</th><th>单价</th><th>vs基准</th></tr></thead><tbody id="price-table"><tr><td colspan=5>加载中...</td></tr></tbody></table>
+<h2 style="font-size:16px;color:#94a3b8;margin:20px 0 12px">冲突规则</h2>
+<div id="rules-list"></div>
+<script>
+(async function(){
+  try{
+    let h=await fetch('/api/health');let hd=await h.json();
+    document.getElementById('uptime').textContent=Math.floor(hd.uptime_seconds/60)+'min';
+    let a=await fetch('/api/audit');let ad=await a.json();
+    document.getElementById('cnt-quote').textContent=(ad.records||[]).filter(r=>r.event_type==='quote').length;
+    document.getElementById('cnt-panel').textContent=(ad.records||[]).filter(r=>r.event_type==='expert_panel').length;
+    document.getElementById('audit-status').textContent=ad.chain_valid?'✅ 完整':'❌ 断裂';
+    // 报价梯度
+    document.getElementById('price-table').innerHTML=[
+      ['45钢','¥1,178','¥5,891','¥117.81','基准'],
+      ['6061铝合金','¥1,541','¥7,656','¥154.06','1.3x'],
+      ['304不锈钢','¥1,813','¥9,063','¥181.25','1.5x'],
+      ['316L不锈钢','¥2,175','¥10,875','¥217.50','1.8x'],
+      ['钛合金TC4','¥6,344','¥31,719','¥634.38','5.4x'],
+    ].map(r=>'<tr>'+r.map(c=>'<td>'+c+'</td>').join('')+'</tr>').join('');
+    document.getElementById('rules-list').innerHTML=[
+      {t:'green',n:'6061 + 阳极氧化',s:'✅ 允许'},
+      {t:'green',n:'45钢 + 发黑',s:'✅ 允许'},
+      {t:'red',n:'304 + 阳极氧化',s:'❌ 阻断'},
+      {t:'yellow',n:'304 + 电镀',s:'⚠️ 警告'},
+      {t:'red',n:'钛合金 + 镀锌',s:'❌ 阻断'},
+      {t:'yellow',n:'6061 + 电镀+IT6',s:'⚠️ 警告'},
+    ].map(r=>'<div class="bar"><span class="tag '+r.t+'">'+r.n+'</span><span class="text">'+r.s+'</span></div>').join('');
+  }catch(e){console.error(e)}
+})();
+</script>
+</body></html>"""
+
 # ── HTML 前端 ──
 HTML_PAGE = """<!DOCTYPE html>
 <html lang="zh-CN">
@@ -353,7 +455,7 @@ HTML_PAGE = """<!DOCTYPE html>
 <title>🦞 Union·由你 — CNC AI 工艺大脑</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f172a;color:#e2e8f0;height:100vh;display:flex;flex-direction:column}
+body{font-family:'Noto Sans CJK SC','WenQuanYi Micro Hei','Microsoft YaHei',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f172a;color:#e2e8f0;height:100vh;display:flex;flex-direction:column}
 header{background:#1e293b;padding:12px 20px;border-bottom:1px solid #334155;display:flex;align-items:center;gap:12px}
 header h1{font-size:18px;color:#38bdf8}
 header .status{font-size:12px;color:#94a3b8;margin-left:auto}
