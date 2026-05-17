@@ -1,0 +1,36 @@
+# Build
+build/
+dist/
+*.pyc
+__pycache__/
+
+# Data
+data/*.db
+*.db-journal
+
+# Models
+models/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+*.egg-info/
+.eggs/
+*.egg
+
+# Release packages
+*.tar.gz
+*.zip
+*.checksum.txt
+
+# Env
+.env
+.venv/
+venv/
