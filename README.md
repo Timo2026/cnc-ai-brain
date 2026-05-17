@@ -1,34 +1,53 @@
-# 🦞 Union·由你 — CNC AI 工艺大脑
+# Union·由你 — CNC AI 工艺大脑 v11.0.2
 
-**v11.0-AutoAdapt-tools** — 离线串行多专家决策系统，零硬编码、全自动适配。
+> 全离线工业AI系统。不联网、不调云API、数据不出车间。
 
----
+[![Version](https://img.shields.io/badge/version-11.0.2-blue)](https://github.com/Timo2026/cnc-ai-brain)
+[![Python](https://img.shields.io/badge/python-3.10%2B-green)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-orange)](LICENSE)
+[![Status](https://img.shields.io/badge/status-demo--ready-brightgreen)]()
 
-## 功能
+## 一句话
 
-| 功能 | 说明 |
-|------|------|
-| 💰 智能报价 | 基于 rule-based 引擎的精确 CNC 报价（非 LLM 估算） |
-| 🏛️ 专家会议 | 串行多专家（CFO/BI/工艺/战略/CEO），一票否决+CEO 覆写 |
-| 🔍 冲突检查 | 10 条硬规则 + LLM 软规则，自动拦截不可行工艺组合 |
-| 📊 历史查询 | SQLite 客户订单数据库，BI 专家有硬数据支撑 |
-| 🔗 审计链 | 哈希链防篡改审计日志 |
-| 🌐 Web 界面 | FastAPI + HTML，REST API 可供外部系统调用 |
+输入材料和数量，1秒算报价，70秒做接单决策。全本地运行，零云依赖。
 
-## 系统要求
+## 30秒看懂
 
-| 组件 | 最低 | 推荐 |
+```
+┌─────────────────────────────────────────────────┐
+│  用户输入: "6061法兰 50件 阳极氧化 报价"         │
+│       ↓                                         │
+│  报价路径(<1s) → rule-based引擎 → ¥7,656         │
+│  冲突路径(<1s) → 10条硬规则   → 304+阳极氧化? 阻断│
+│  专家路径(~70s)→ 3专家串行+CEO → 钛合金IT5? 否决 │
+│       ↓                                         │
+│  审计哈希链 (防篡改)                              │
+└─────────────────────────────────────────────────┘
+```
+
+## 核心能力
+
+| 能力 | 说明 | 性能 |
 |------|------|------|
-| CPU | 4 核 | 8 核+ |
-| 内存 | 8 GB | 16 GB |
-| 磁盘 | 2 GB | 10 GB |
-| Python | 3.10+ | 3.10 |
-| Ollama | 最新版 | 最新版 |
-| 模型 | qwen2.5:1.5b | qwen2.5:3b |
+| 智能报价 | 5种材料梯度, 纯Python规则引擎 | <1s |
+| 工艺冲突 | 10条硬规则(材料-表面-公差) | <1s |
+| 专家会议 | 3专家串行+一票否决+CEO裁决 | ~70s |
+| 审计防篡改 | SQLite哈希链 | 零开销 |
+| 零硬编码 | 自适应硬件/模型/Skill | 启动时 |
+
+## 报价梯度
+
+| 材料 | 10件 | 50件 | 单价 | 倍率 |
+|------|------|------|------|------|
+| 45钢 | ¥1,178 | ¥5,891 | ¥117.81 | 基准 |
+| 6061铝合金 | ¥1,541 | ¥7,656 | ¥154.06 | 1.3x |
+| 304不锈钢 | ¥1,813 | ¥9,063 | ¥181.25 | 1.5x |
+| 316L不锈钢 | ¥2,175 | ¥10,875 | ¥217.50 | 1.8x |
+| 钛合金TC4 | ¥6,344 | ¥31,719 | ¥634.38 | 5.4x |
 
 ## 快速开始
 
-### 方式 1: 源码运行 (Linux/macOS)
+### Linux (推荐)
 
 ```bash
 # 1. 安装 Ollama
@@ -38,96 +57,98 @@ curl -fsSL https://ollama.com/install.sh | sh
 ollama pull qwen2.5:3b
 
 # 3. 安装依赖
-pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+pip install -r requirements.txt
 
 # 4. 启动
-python app/main.py
-
-# 5. 访问
-open http://localhost:7861
+python3 app/main.py
+# → http://localhost:7861
 ```
 
-### 方式 2: Docker 一键部署
+### Windows 一键安装
 
-```bash
-# 构建并启动（含 Ollama）
-docker compose up -d
-
-# 等待模型拉取完成后访问
-open http://localhost:7861
+```cmd
+# 下载并解压后, 双击运行:
+install_windows.bat
+# 自动安装 Ollama → 拉模型 → 装依赖 → 启动服务
 ```
 
-### 方式 3: Windows EXE
+### Docker
 
 ```bash
-# 构建 EXE
-pip install pyinstaller
-pyinstaller union_by_ni.spec
-
-# 复制到 Windows (需先安装 Ollama 并拉取模型)
-# 双击 deploy/start_windows.bat
+docker-compose up -d
 ```
 
 ## API 接口
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/` | GET | Web 界面 |
-| `/api/chat` | POST | 对话/报价/专家会议 |
-| `/api/status` | GET | 系统状态 |
-| `/api/conflict-check` | GET | 工艺冲突检测 |
-| `/api/audit` | GET | 审计链查询+验证 |
-
-### API 示例
-
-```bash
-# 报价
-curl -X POST http://localhost:7861/api/chat \
-  -H 'Content-Type: application/json' \
-  -d '{"message":"6061铝合金法兰 50件 阳极氧化 报价"}'
-
-# 冲突检查
-curl "http://localhost:7861/api/conflict-check?material=304&surface_treatment=阳极氧化"
-```
+| `/` | GET | 对话前端 |
+| `/api/chat` | POST | 对话API |
+| `/api/health` | GET | 工厂IT自检 |
+| `/api/demo` | GET | 5场景演示 |
+| `/api/dashboard` | GET | 实时仪表盘 |
+| `/api/conflict-check` | POST | 工艺冲突 |
+| `/api/audit` | GET | 审计查询 |
 
 ## 项目结构
 
 ```
 cnc-ai-brain/
-├── app/main.py                  # FastAPI + HTML 主入口
+├── app/main.py              # FastAPI 入口 + HTML前端
 ├── src/
-│   ├── core/                    # 环境探测、模型自适应、Skill 注册
-│   ├── neuro_core/             # 串行多专家引擎、冲突检查
-│   ├── ai_engine/              # Ollama HTTP 封装
-│   ├── runtime/                # 事件总线、报价适配、Skill 注册、历史查询
-│   └── safety/                 # 审计日志 (SQLite 哈希链)
+│   ├── core/                # 环境探测 + 模型自选 + Skill加载
+│   ├── ai_engine/           # Ollama 推理引擎
+│   ├── neuro_core/          # 专家会议引擎 + 冲突检测 + Schema校验
+│   ├── runtime/             # 报价适配器 + 历史查询 + 事件总线
+│   └── safety/              # 审计日志 (哈希链)
 ├── config/
-│   ├── experts/ (5 YAML)       # CFO/BI/工艺/战略/CEO
-│   └── skills/  (4 YAML)       # 报价/CAD/冲突检查/历史查询
-├── deploy/                     # 部署脚本
-├── Dockerfile                  # Docker 构建
-├── docker-compose.yml          # 一键部署 (Ollama + App)
-├── union_by_ni.spec            # PyInstaller 打包
-└── requirements.txt            # Python 依赖
+│   ├── experts/             # 5位专家 YAML (含JSON Schema)
+│   └── skills/              # 3项技能 YAML
+├── deploy/                  # systemd + 演示部署 + Windows脚本
+├── Dockerfile               # Docker 镜像
+├── docker-compose.yml       # Ollama+App 一键部署
+└── union_by_ni.spec         # PyInstaller 打包
 ```
 
-## 专家-Skill 联动
+## 部署方式
 
-| 专家 | 调用 Skill | 数据来源 |
-|------|-----------|----------|
-| CFO | `quote_calculate` | 本地 rule-based 引擎 |
-| BI | `history_lookup` | SQLite 订单数据库 |
-| 工艺总监 | `conflict_check` | 10 条硬规则库 |
+| 方式 | 适用 | 命令 |
+|------|------|------|
+| 直接运行 | 开发/演示 | `python3 app/main.py` |
+| systemd | Linux服务器 | `sudo systemctl enable cnc-brain` |
+| Docker | 容器化 | `docker-compose up -d` |
+| EXE | Windows工控机 | PyInstaller 打包 |
 
-> 专家的每一句判断，都有硬数据支撑。
+## 专家阵容
+
+| 专家 | 职责 | 否决权 |
+|------|------|--------|
+| CFO | 利润/现金流/回款 | ✅ 一票否决 |
+| BI分析师 | 客户历史/市场趋势 | - |
+| 战略官 | 产能/长期价值 | - |
+| 工艺总监 | 公差/设备/刀具 | - |
+| CEO | 最终裁决 | ✅ 可覆写否决 |
+
+## 演示场景
+
+```
+S1: 6061法兰 50件 阳极氧化 → ¥7,656 (常规报价)
+S2: 钛合金TC4 10件 → ¥6,344 (高价材料梯度)
+S3: 304法兰 阳极氧化 → ❌ 工艺冲突阻断
+S4: 304法兰 钝化 → ¥1,813 (冲突修复后报价)
+S5: 钛合金IT5 5万预算 → REJECTED (专家否决)
+```
+
+## 版本
+
+| 版本 | 日期 | 变更 |
+|------|------|------|
+| v11.0.0 | 2026-05-17 | P0清零·报价正确·可演示 |
+| v11.0.1 | 2026-05-17 | Schema校验器 + 重试 |
+| v11.0.2 | 2026-05-17 | 演示就绪·仪表盘·systemd |
 
 ## 作者
 
-- **作者**: timo.cao
-- **邮箱**: miscdd@163.com
-- **生成**: 大帅教练系统 (dashuai coach)
-- **许可**: 商业闭源
-
----
-
-*“说人话，做零件” — Union·由你*
+- 作者: timo.cao
+- 邮箱: miscdd@163.com
+- 生成: 大帅教练系统 (dashuai coach)
