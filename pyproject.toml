@@ -1,6 +1,6 @@
 [project]
 name = "cnc-ai-brain"
-version = "11.0.0"
+version = "11.0.3"
 description = "CNC AI 工艺大脑 — 离线·串行多智能体·透明决策"
 requires-python = ">=3.10"
 readme = "README.md"
