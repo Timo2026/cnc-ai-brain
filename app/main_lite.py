@@ -14,7 +14,8 @@ from fastapi import FastAPI, Request, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 import uvicorn
 
-from src.runtime.step_generator import generate_part, PART_GENERATORS
+from src.runtime.step_generator_dual import generate_part, get_engine_status
+from src.runtime.step_generator import PART_GENERATORS
 from src.runtime.step_parser import extract_bbox_from_step, estimate_volume_from_bbox, get_material_density
 from src.runtime.export_bundler import create_bundle
 
@@ -268,6 +269,7 @@ async def status():
         "materials": list(MAT_COEFS.keys()),
         "surfaces": list(SURF_COEFS.keys()),
         "ollama": detect_ollama(),
+        "engine": get_engine_status(),
     })
 
 @app.get("/api/version")

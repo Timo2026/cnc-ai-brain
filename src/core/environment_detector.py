@@ -33,6 +33,7 @@ class EnvironmentDetector:
             "skills": self._discover_skills(),
             "experts": self._discover_experts(),
             "ollama": self._detect_ollama(),
+        "occ": self._detect_occ(),
         }
         return result
 
@@ -122,6 +123,17 @@ class EnvironmentDetector:
         return gpus
 
     # ── Ollama 服务 ──────────────────────────────────
+
+    @staticmethod
+    def _detect_occ() -> Dict[str, Any]:
+        """检测pythonocc-core是否可用。"""
+        try:
+            import OCC.Core
+            from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeCylinder
+            result = {"available": True, "reason": "", "version": getattr(OCC.Core, "__version__", "unknown")}
+        except ImportError as e:
+            result = {"available": False, "reason": f"OCC未安装: {e}", "version": None}
+        return result
 
     def _detect_ollama(self) -> Dict[str, Any]:
         """检测本地 Ollama 服务及已安装模型。"""

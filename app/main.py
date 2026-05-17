@@ -29,7 +29,8 @@ from src.runtime.progress_reporter import ProgressReporter
 from src.runtime.quote_adapter import QuoteAdapter
 from src.runtime.skill_caller import SkillCaller
 from src.runtime.history_lookup import HistoryLookup
-from src.runtime.step_generator import generate_part, get_weight, DENSITY
+from src.runtime.step_generator_dual import generate_part, get_engine_status
+from src.runtime.step_generator import get_weight, DENSITY
 from src.runtime.step_parser import extract_bbox_from_step, estimate_volume_from_bbox, get_material_density
 from src.runtime.export_bundler import create_bundle
 
@@ -86,6 +87,7 @@ STARTUP_INFO = {
     "expert_count": best_config.get("expert_count", 3) if best_config else 3,
     "skills": len(registry["skills"]), "experts": list(registry["experts"].keys()),
     "tools": skill_registry.list_available(), "version": "11.0.4",
+    "engine": get_engine_status(),
 }
 
 import time as _time
